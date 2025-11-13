@@ -1,0 +1,101 @@
+name: Jira Triggered Agent Execution
+
+on:
+  repository_dispatch:
+    types: [jira-issue-created, jira-issue-updated, jira-issue-transition]
+
+jobs:
+  run-multi-agent:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Extract Jira Issue Details
+        id: jira
+        run: |
+          echo "issue_key=${{ github.event.client_payload.issue_key }}" >> $GITHUB_OUTPUT
+          echo "event_type=${{ github.event.client_payload.event_type }}" >> $GITHUB_OUTPUT
+          echo "project_key=${{ github.event.client_payload.project_key }}" >> $GITHUB_OUTPUT
+          echo "issue_type=${{ github.event.client_payload.issue_type }}" >> $GITHUB_OUTPUT
+          echo "assignee=${{ github.event.client_payload.assignee }}" >> $GITHUB_OUTPUT
+      
+      - name: Log Event Details
+        run: |
+          echo "🎫 Jira Event Received"
+          echo "Event Type: ${{ github.event.action }}"
+          echo "Issue Key: ${{ steps.jira.outputs.issue_key }}"
+          echo "Project: ${{ steps.jira.outputs.project_key }}"
+          echo "Issue Type: ${{ steps.jira.outputs.issue_type }}"
+          echo "Assignee: ${{ steps.jira.outputs.assignee }}"
+      
+      - name: Determine Project Path
+        id: project
+        run: |
+          # Map Jira project key to repository project path
+          PROJECT_KEY="${{ steps.jira.outputs.project_key }}"
+          
+          case "$PROJECT_KEY" in
+            "CGCI")
+              echo "project_name=cms-project" >> $GITHUB_OUTPUT
+              echo "project_path=." >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "project_name=default-project" >> $GITHUB_OUTPUT
+              echo "project_path=." >> $GITHUB_OUTPUT
+              ;;
+          esac
+      
+      - name: Run Multi-Agent System
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+          JIRA_TOKEN: ${{ secrets.JIRA_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python run_agent.py \
+            --jira-key "${{ steps.jira.outputs.issue_key }}" \
+            --project "${{ steps.project.outputs.project_name }}" \
+            --project-path "${{ steps.project.outputs.project_path }}"
+      
+      - name: Upload Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-execution-logs-${{ steps.jira.outputs.issue_key }}
+          path: |
+            artifacts/
+            *.log
+          retention-days: 30
+      
+      - name: Notify on Failure
+        if: failure()
+        run: |
+          echo "❌ Multi-agent execution failed for ${{ steps.jira.outputs.issue_key }}"
+          # Add notification logic here (Slack, email, etc.)
+      
+      - name: Notify on Success
+        if: success()
+        run: |
+          echo "✅ Multi-agent execution completed successfully for ${{ steps.jira.outputs.issue_key }}"
+          # Add notification logic here (Slack, email, etc.)

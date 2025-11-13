@@ -85,6 +85,9 @@ class Orchestrator:
         if not language_plugin:
             raise ValueError(f"No plugin found for language: {context.primary_language}")
         
+        # Set project path for Anthropic client tools
+        self.anthropic_client.set_project_path(context.project_path)
+        
         # Initialize Git clients
         git_client = GitClient(context.project_path)
         

@@ -3,9 +3,13 @@ import argparse
 import asyncio
 import sys
 from pathlib import Path
+from dotenv import load_dotenv
 
 from core.config_loader import ConfigLoader
 from core.orchestrator import Orchestrator
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 def parse_args():

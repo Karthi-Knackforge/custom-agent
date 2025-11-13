@@ -1,24 +1,38 @@
-"""Anthropic API client wrapper with retry logic."""
+"""Anthropic API client wrapper with retry logic and advanced features."""
 import json
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import anthropic
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
+from integrations.claude_tools import ClaudeTools
+
 
 class AnthropicClient:
-    """Wrapper for Anthropic API with code generation and review capabilities."""
+    """Wrapper for Anthropic API with advanced capabilities (tools, caching, thinking)."""
     
-    def __init__(self, api_key: str, model: str = "claude-3-5-sonnet-20241022"):
+    def __init__(self, api_key: str, model: str = "claude-3-5-sonnet-20241022", enable_tools: bool = True):
         """Initialize Anthropic client.
         
         Args:
             api_key: Anthropic API key
             model: Model to use for generation
+            enable_tools: Enable function calling capabilities
         """
         self.client = anthropic.Anthropic(api_key=api_key)
         self.model = model
+        self.enable_tools = enable_tools
+        self.tools_handler: Optional[ClaudeTools] = None
+    
+    def set_project_path(self, project_path: Path) -> None:
+        """Set project path for tool operations.
+        
+        Args:
+            project_path: Path to the project directory
+        """
+        self.tools_handler = ClaudeTools(project_path)
     
     @retry(
         stop=stop_after_attempt(3),
@@ -32,10 +46,11 @@ class AnthropicClient:
         constraints: Optional[List[str]] = None,
         iteration: int = 1,
         previous_critique: Optional[str] = None,
-        max_tokens: int = 4096,
+        max_tokens: int = 8192,
         temperature: float = 0.1,
+        enable_thinking: bool = True,
     ) -> Dict[str, Any]:
-        """Generate code using Claude.
+        """Generate code using Claude with advanced features.
         
         Args:
             task_description: Description of the task
@@ -45,12 +60,17 @@ class AnthropicClient:
             previous_critique: Critique from previous iteration (if any)
             max_tokens: Maximum tokens to generate
             temperature: Temperature for generation
+            enable_thinking: Enable extended thinking mode for better quality
             
         Returns:
             Dictionary with 'files' list and optional 'notes'
         """
-        # Build prompt
-        system_prompt = self._build_system_prompt(context.get("language", "python"))
+        # Build prompts with caching
+        system_blocks = self._build_system_prompt_with_cache(
+            context.get("language", "python"),
+            context
+        )
+        
         user_prompt = self._build_generation_prompt(
             task_description=task_description,
             context=context,
@@ -59,22 +79,86 @@ class AnthropicClient:
             previous_critique=previous_critique,
         )
         
-        # Call API
-        response = self.client.messages.create(
-            model=self.model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            system=system_prompt,
-            messages=[
-                {"role": "user", "content": user_prompt}
-            ]
-        )
+        # Prepare API call parameters
+        api_params = {
+            "model": self.model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "system": system_blocks,
+            "messages": [{"role": "user", "content": user_prompt}]
+        }
+        
+        # Add tools if enabled
+        if self.enable_tools and self.tools_handler:
+            api_params["tools"] = ClaudeTools.get_tool_definitions()
+        
+        # Add extended thinking
+        if enable_thinking:
+            api_params["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": 2000
+            }
+        
+        # Call API with tool use loop
+        messages = [{"role": "user", "content": user_prompt}]
+        final_response = None
+        max_tool_rounds = 5
+        
+        for round_num in range(max_tool_rounds):
+            response = self.client.messages.create(
+                **{**api_params, "messages": messages}
+            )
+            
+            # Check if we need to handle tool calls
+            if response.stop_reason == "tool_use":
+                # Process tool calls
+                tool_results = []
+                for content_block in response.content:
+                    if content_block.type == "tool_use":
+                        tool_result = self.tools_handler.execute_tool(
+                            content_block.name,
+                            content_block.input
+                        )
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": content_block.id,
+                            "content": json.dumps(tool_result)
+                        })
+                
+                # Add assistant response and tool results to conversation
+                messages.append({"role": "assistant", "content": response.content})
+                messages.append({"role": "user", "content": tool_results})
+            else:
+                # Got final response
+                final_response = response
+                break
+        
+        if not final_response:
+            final_response = response
         
         # Extract and parse response
-        content = response.content[0].text
+        content = self._extract_text_from_response(final_response)
         result = self._parse_code_generation_response(content)
         
         return result
+    
+    def _extract_text_from_response(self, response) -> str:
+        """Extract text content from response, handling thinking blocks.
+        
+        Args:
+            response: API response object
+            
+        Returns:
+            Text content string
+        """
+        text_parts = []
+        for content_block in response.content:
+            if content_block.type == "text":
+                text_parts.append(content_block.text)
+            elif content_block.type == "thinking":
+                # Optionally log thinking for debugging
+                pass
+        return "\n".join(text_parts)
     
     @retry(
         stop=stop_after_attempt(3),
@@ -122,9 +206,21 @@ class AnthropicClient:
         
         return result
     
-    def _build_system_prompt(self, language: str) -> str:
-        """Build system prompt for code generation."""
-        base = """You are an expert software engineer. Generate clean, maintainable, and well-tested code.
+    def _build_system_prompt_with_cache(
+        self, 
+        language: str, 
+        context: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """Build system prompt with prompt caching for cost efficiency.
+        
+        Args:
+            language: Programming language
+            context: Project context
+            
+        Returns:
+            List of system message blocks with cache control
+        """
+        base_instructions = """You are an expert software engineer. Generate clean, maintainable, and well-tested code.
 
 Guidelines:
 - Write production-quality code with proper error handling
@@ -140,7 +236,38 @@ Guidelines:
             "typescript": "\n- Use strict TypeScript types\n- Avoid 'any' types\n- Follow ESLint recommendations",
         }
         
-        return base + language_specific.get(language, "")
+        base_prompt = base_instructions + language_specific.get(language, "")
+        
+        # Build system blocks with caching
+        system_blocks = [
+            {
+                "type": "text",
+                "text": base_prompt,
+                "cache_control": {"type": "ephemeral"}  # Cache base instructions
+            }
+        ]
+        
+        # Add project structure with caching (static context)
+        if context.get("project_structure"):
+            system_blocks.append({
+                "type": "text",
+                "text": f"\n\n# Project Structure\n```json\n{json.dumps(context['project_structure'], indent=2)}\n```",
+                "cache_control": {"type": "ephemeral"}  # Cache project structure
+            })
+        
+        return system_blocks
+    
+    def _build_system_prompt(self, language: str) -> str:
+        """Build simple system prompt (legacy method).
+        
+        Args:
+            language: Programming language
+            
+        Returns:
+            System prompt string
+        """
+        blocks = self._build_system_prompt_with_cache(language, {})
+        return blocks[0]["text"]
     
     def _build_generation_prompt(
         self,

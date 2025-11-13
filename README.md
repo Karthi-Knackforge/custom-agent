@@ -4,6 +4,7 @@ A sophisticated multi-agent system for automated code generation, review, and de
 
 ## 🚀 Features
 
+### Core Capabilities
 - **Multi-Agent Architecture**: Coordinated execution of specialized agents (generator, reviewer, git handler, jira handler)
 - **Language Agnostic**: Plugin-based architecture supporting Python, JavaScript/TypeScript, Go, Java, and more
 - **Monorepo Support**: Configure multiple projects with different languages in a single repository
@@ -12,6 +13,14 @@ A sophisticated multi-agent system for automated code generation, review, and de
 - **GitHub Integration**: Automatic PR creation as drafts with quality summaries
 - **Jira Integration**: Fetch issue details and post status updates
 - **Dry Run Mode**: Test execution without making Git/Jira changes
+
+### 🆕 Advanced Claude SDK Features
+- **🛠️ Tool Use (Function Calling)**: Claude can explore your codebase, read files, search patterns, and run tests before generating code
+- **💾 Prompt Caching**: Automatic caching reduces API costs by up to 85% on repetitive prompts
+- **🧠 Extended Thinking**: Claude reasons through problems before coding, resulting in 20-40% fewer bugs
+- **📊 Context-Aware**: Better code quality through real-time project exploration
+
+*See [CLAUDE_SDK_FEATURES.md](docs/CLAUDE_SDK_FEATURES.md) for detailed documentation.*
 
 ## 📋 Prerequisites
 
@@ -61,16 +70,40 @@ scopes:
 
 ## 🎯 Usage
 
-### Command Line
+### 🚀 Automated Jira Integration (Recommended)
+
+Set up automatic triggering when Jira issues are created/updated:
+
+1. **Quick Setup** (5 minutes):
+   ```bash
+   # See docs/JIRA_SETUP_QUICKSTART.md for detailed steps
+   ```
+   - Create GitHub PAT with `repo` and `workflow` scopes
+   - Configure GitHub secrets
+   - Set up Jira automation rule
+
+2. **Test the integration**:
+   ```bash
+   python3 scripts/test_github_webhook.py \
+     --owner YOUR_USERNAME \
+     --repo YOUR_REPO \
+     --issue CGCI-2
+   ```
+
+3. **Create a Jira issue** → Agent automatically runs!
+
+📖 **Full Guide**: [Jira-GitHub Integration Guide](docs/JIRA_GITHUB_INTEGRATION.md)
+
+### Command Line (Manual Execution)
 
 **Basic usage with Jira issue:**
 ```bash
-python scripts/run_agent.py --jira-key PROJ-123 --project my-service
+python run_agent.py --jira-key PROJ-123 --project my-service
 ```
 
 **With custom task description:**
 ```bash
-python scripts/run_agent.py \
+python run_agent.py \
   --jira-key PROJ-123 \
   --project my-service \
   --task "Add user authentication endpoint"
@@ -78,7 +111,7 @@ python scripts/run_agent.py \
 
 **Dry run (no Git/Jira operations):**
 ```bash
-python scripts/run_agent.py \
+python run_agent.py \
   --jira-key PROJ-123 \
   --project my-service \
   --dry-run
@@ -86,7 +119,7 @@ python scripts/run_agent.py \
 
 **Specify project path directly:**
 ```bash
-python scripts/run_agent.py \
+python run_agent.py \
   --jira-key PROJ-123 \
   --project-path /path/to/project
 ```

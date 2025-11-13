@@ -27,6 +27,43 @@ class JiraClient:
         self.session.auth = (self.email, self.token)
         self.session.headers.update({"Content-Type": "application/json"})
     
+    def _parse_adf_to_text(self, adf_content: Optional[Dict[str, Any]]) -> str:
+        """Parse Atlassian Document Format to plain text.
+        
+        Args:
+            adf_content: ADF content dictionary
+            
+        Returns:
+            Plain text string
+        """
+        if not adf_content or not isinstance(adf_content, dict):
+            return ""
+        
+        text_parts = []
+        
+        def extract_text(node: Dict[str, Any]) -> None:
+            """Recursively extract text from ADF nodes."""
+            if not isinstance(node, dict):
+                return
+            
+            node_type = node.get("type", "")
+            
+            # Handle text nodes
+            if node_type == "text":
+                text_parts.append(node.get("text", ""))
+            
+            # Handle content array
+            content = node.get("content", [])
+            if isinstance(content, list):
+                for child in content:
+                    extract_text(child)
+                    # Add newline after paragraphs
+                    if child.get("type") == "paragraph":
+                        text_parts.append("\n")
+        
+        extract_text(adf_content)
+        return "".join(text_parts).strip()
+    
     def get_issue(self, issue_key: str) -> Dict[str, Any]:
         """Fetch issue details by key.
         
@@ -46,16 +83,27 @@ class JiraClient:
         # Extract relevant fields
         fields = data.get("fields", {})
         
+        # Parse description from ADF format
+        description_adf = fields.get("description")
+        description = self._parse_adf_to_text(description_adf)
+        
+        # Safely get nested fields with defaults
+        issuetype = fields.get("issuetype") or {}
+        status = fields.get("status") or {}
+        priority = fields.get("priority") or {}
+        assignee = fields.get("assignee") or {}
+        reporter = fields.get("reporter") or {}
+        
         return {
-            "key": data.get("key"),
-            "id": data.get("id"),
+            "key": data.get("key", ""),
+            "id": data.get("id", ""),
             "summary": fields.get("summary", ""),
-            "description": fields.get("description", ""),
-            "issue_type": fields.get("issuetype", {}).get("name", ""),
-            "status": fields.get("status", {}).get("name", ""),
-            "priority": fields.get("priority", {}).get("name", ""),
-            "assignee": fields.get("assignee", {}).get("displayName", "Unassigned"),
-            "reporter": fields.get("reporter", {}).get("displayName", ""),
+            "description": description,
+            "issue_type": issuetype.get("name", ""),
+            "status": status.get("name", ""),
+            "priority": priority.get("name", ""),
+            "assignee": assignee.get("displayName", "Unassigned"),
+            "reporter": reporter.get("displayName", ""),
             "created": fields.get("created", ""),
             "updated": fields.get("updated", ""),
         }
