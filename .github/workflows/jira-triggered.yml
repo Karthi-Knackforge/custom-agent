@@ -9,8 +9,17 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout repository
+      - name: Checkout custom-agent repository
         uses: actions/checkout@v4
+        with:
+          path: custom-agent
+      
+      - name: Checkout target repository (cms-project)
+        uses: actions/checkout@v4
+        with:
+          repository: Karthi-Knackforge/cms-project
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: cms-project
       
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -21,14 +30,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          key: ${{ runner.os }}-pip-${{ hashFiles('custom-agent/requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-
       
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r custom-agent/requirements.txt
       
       - name: Extract Jira Issue Details
         id: jira
@@ -51,19 +60,27 @@ jobs:
       - name: Determine Project Path
         id: project
         run: |
-          # Map Jira project key to repository project path
+          # Map Jira project key to repository and path
           PROJECT_KEY="${{ steps.jira.outputs.project_key }}"
           
           case "$PROJECT_KEY" in
             "CGCI")
               echo "project_name=cms-project" >> $GITHUB_OUTPUT
-              echo "project_path=." >> $GITHUB_OUTPUT
+              echo "project_path=${{ github.workspace }}/cms-project" >> $GITHUB_OUTPUT
+              echo "target_repo=Karthi-Knackforge/cms-project" >> $GITHUB_OUTPUT
               ;;
             *)
-              echo "project_name=default-project" >> $GITHUB_OUTPUT
-              echo "project_path=." >> $GITHUB_OUTPUT
+              echo "project_name=cms-project" >> $GITHUB_OUTPUT
+              echo "project_path=${{ github.workspace }}/cms-project" >> $GITHUB_OUTPUT
+              echo "target_repo=Karthi-Knackforge/cms-project" >> $GITHUB_OUTPUT
               ;;
           esac
+      
+      - name: Configure Git
+        run: |
+          cd cms-project
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
       
       - name: Run Multi-Agent System
         env:
@@ -72,7 +89,10 @@ jobs:
           JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
           JIRA_TOKEN: ${{ secrets.JIRA_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_OWNER: Karthi-Knackforge
+          GITHUB_REPO: cms-project
         run: |
+          cd custom-agent
           python run_agent.py \
             --jira-key "${{ steps.jira.outputs.issue_key }}" \
             --project "${{ steps.project.outputs.project_name }}" \
