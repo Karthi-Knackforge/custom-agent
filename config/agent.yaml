@@ -1,0 +1,51 @@
+default_model: claude-3-5-sonnet-20241022
+max_iterations: 3
+max_tokens: 4096
+temperature: 0.1
+
+pr:
+  draft: true
+  reviewers_label: "needs-approval"
+  branch_prefix: "feat"
+  auto_assign_reviewers: []
+
+languages:
+  python:
+    test: "pytest -q"
+    lint: "ruff check ."
+    format: "ruff format ."
+    typecheck: "mypy ."
+    extensions: [".py"]
+  javascript:
+    test: "npm test"
+    lint: "eslint ."
+    format: "prettier --write ."
+    extensions: [".js", ".jsx"]
+  typescript:
+    test: "npm test"
+    lint: "eslint ."
+    format: "prettier --write ."
+    typecheck: "tsc --noEmit"
+    extensions: [".ts", ".tsx"]
+  go:
+    test: "go test ./..."
+    lint: "golangci-lint run"
+    format: "gofmt -w ."
+    extensions: [".go"]
+  java:
+    test: "mvn test"
+    lint: "mvn checkstyle:check"
+    format: "mvn formatter:format"
+    extensions: [".java"]
+
+projects_dir: "."
+max_file_size: 204800  # 200 KB
+
+security:
+  allow_path_traversal: false
+  max_files_per_change: 50
+  restricted_patterns:
+    - "**/.env"
+    - "**/.git/**"
+    - "**/node_modules/**"
+    - "**/__pycache__/**"

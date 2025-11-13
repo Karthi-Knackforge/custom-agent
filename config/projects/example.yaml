@@ -1,0 +1,20 @@
+name: example-service
+path: services/example
+primary_language: python
+languages: [python]
+
+scopes:
+  include:
+    - services/example/**
+  exclude:
+    - services/example/build/**
+    - services/example/.pytest_cache/**
+    - services/example/__pycache__/**
+
+jira:
+  issue_prefix: EX
+
+quality:
+  test: "pytest -q tests/"
+  lint: "ruff check ."
+  typecheck: "mypy ."

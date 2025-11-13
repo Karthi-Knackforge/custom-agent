@@ -1,0 +1,91 @@
+name: Multi-Agent Code Generator
+
+on:
+  workflow_dispatch:
+    inputs:
+      jira_key:
+        description: 'Jira issue key (e.g., PROJ-123)'
+        required: true
+        type: string
+      project:
+        description: 'Project name (from config/projects/)'
+        required: false
+        type: string
+      task_description:
+        description: 'Optional task description (if not fetching from Jira)'
+        required: false
+        type: string
+      dry_run:
+        description: 'Dry run mode (skip Git/Jira operations)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  generate-code:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for git operations
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+      
+      - name: Run multi-agent system
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+          JIRA_TOKEN: ${{ secrets.JIRA_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python scripts/run_agent.py \
+            --jira-key "${{ github.event.inputs.jira_key }}" \
+            ${{ github.event.inputs.project && format('--project {0}', github.event.inputs.project) || '' }} \
+            ${{ github.event.inputs.task_description && format('--task "{0}"', github.event.inputs.task_description) || '' }} \
+            ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+      
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-artifacts
+          path: artifacts/
+          retention-days: 7
+      
+      - name: Comment on failure
+        if: failure() && github.event.inputs.dry_run != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const jiraKey = '${{ github.event.inputs.jira_key }}';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            
+            github.rest.issues.create({
+              ...context.repo,
+              title: `Agent execution failed for ${jiraKey}`,
+              body: `The multi-agent code generation failed for Jira issue ${jiraKey}.\n\nSee workflow run: ${runUrl}`,
+              labels: ['agent-failure', 'automation']
+            });
